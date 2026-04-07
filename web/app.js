@@ -1,10 +1,11 @@
 const origin = window.location.origin;
 const isFileOrigin = origin === "null" || origin.startsWith("file:");
 const defaultApiBase = isFileOrigin ? "" : origin;
+const storedApiBase = localStorage.getItem("apiBase") || "";
 
 const state = {
   demo: true,
-  apiBase: defaultApiBase,
+  apiBase: storedApiBase || defaultApiBase,
 };
 
 const mock = {
@@ -339,8 +340,10 @@ if (saveApi) {
   saveApi.addEventListener("click", () => {
     state.apiBase = apiBaseInput.value.trim();
     if (state.apiBase) {
+      localStorage.setItem("apiBase", state.apiBase);
       logLine("API base set", state.apiBase);
     } else {
+      localStorage.removeItem("apiBase");
       logLine("API base", "Cleared");
     }
   });

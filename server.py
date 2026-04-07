@@ -13,11 +13,22 @@ DB_CONFIG = {
     "user": os.getenv("ECOM_DB_USER", "root"),
     "password": os.getenv("ECOM_DB_PASSWORD", "12345678"),
     "database": os.getenv("ECOM_DB_NAME", "ecommerce_db"),
+    "port": int(os.getenv("ECOM_DB_PORT", "3306")),
 }
+
+SSL_CA = os.getenv("ECOM_DB_SSL_CA", "").strip()
+SSL_DISABLED = os.getenv("ECOM_DB_SSL_DISABLED", "false").lower() == "true"
+SSL_VERIFY = os.getenv("ECOM_DB_SSL_VERIFY", "true").lower() == "true"
 
 
 def connect_db():
-    return mysql.connector.connect(**DB_CONFIG)
+    config = dict(DB_CONFIG)
+    if SSL_DISABLED:
+        config["ssl_disabled"] = True
+    elif SSL_CA:
+        config["ssl_ca"] = SSL_CA
+        config["ssl_verify_cert"] = SSL_VERIFY
+    return mysql.connector.connect(**config)
 
 
 def serialize_value(value):

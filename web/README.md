@@ -17,4 +17,5 @@ API mode
 - The UI sends requests to endpoints like `/api/products` and `/api/insights/top-products`.
 
 Database config (optional)
-- `ECOM_DB_HOST`, `ECOM_DB_USER`, `ECOM_DB_PASSWORD`, `ECOM_DB_NAME`
+- `ECOM_DB_HOST`, `ECOM_DB_PORT`, `ECOM_DB_USER`, `ECOM_DB_PASSWORD`, `ECOM_DB_NAME`
+- `ECOM_DB_SSL_CA`, `ECOM_DB_SSL_DISABLED`, `ECOM_DB_SSL_VERIFY`
