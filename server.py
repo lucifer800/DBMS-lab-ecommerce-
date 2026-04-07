@@ -1,0 +1,292 @@
+import os
+from datetime import date, datetime
+from decimal import Decimal
+
+from flask import Flask, jsonify, request
+import mysql.connector
+from mysql.connector import Error
+
+app = Flask(__name__, static_folder="web", static_url_path="")
+
+DB_CONFIG = {
+    "host": os.getenv("ECOM_DB_HOST", "localhost"),
+    "user": os.getenv("ECOM_DB_USER", "root"),
+    "password": os.getenv("ECOM_DB_PASSWORD", "12345678"),
+    "database": os.getenv("ECOM_DB_NAME", "ecommerce_db"),
+}
+
+
+def connect_db():
+    return mysql.connector.connect(**DB_CONFIG)
+
+
+def serialize_value(value):
+    if isinstance(value, (datetime, date)):
+        return value.isoformat(sep=" ")
+    if isinstance(value, Decimal):
+        return float(value)
+    return value
+
+
+def serialize_row(row):
+    if row is None:
+        return None
+    return {key: serialize_value(value) for key, value in row.items()}
+
+
+def serialize_rows(rows):
+    return [serialize_row(row) for row in rows]
+
+
+def fetch_all(query, params=None):
+    conn = connect_db()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(query, params or ())
+        return serialize_rows(cursor.fetchall())
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def fetch_one(query, params=None):
+    conn = connect_db()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(query, params or ())
+        return serialize_row(cursor.fetchone())
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def execute_write(query, params=None):
+    conn = connect_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(query, params or ())
+        conn.commit()
+        return cursor.lastrowid, cursor.rowcount
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def require_fields(payload, fields):
+    missing = []
+    for field in fields:
+        value = payload.get(field)
+        if value is None or value == "":
+            missing.append(field)
+    return missing
+
+
+def json_error(message, status=400):
+    return jsonify({"message": message}), status
+
+
+@app.after_request
+def add_cors_headers(response):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    response.headers["Access-Control-Allow-Methods"] = "GET,POST,PUT,DELETE,OPTIONS"
+    return response
+
+
+@app.route("/api/<path:unused>", methods=["OPTIONS"])
+def api_options(unused):
+    return "", 204
+
+
+@app.route("/")
+def index():
+    return app.send_static_file("index.html")
+
+
+@app.route("/api/products", methods=["GET"])
+def list_products():
+    rows = fetch_all(
+        """
+        SELECT product_id, sku, name, description, category_id, created_at
+        FROM products
+        ORDER BY created_at DESC, product_id DESC
+        """
+    )
+    return jsonify(rows)
+
+
+@app.route("/api/products", methods=["POST"])
+def create_product():
+    payload = request.get_json(silent=True) or {}
+    missing = require_fields(payload, ["sku", "name", "description", "category_id"])
+    if missing:
+        return json_error(f"Missing fields: {', '.join(missing)}")
+
+    last_id, _ = execute_write(
+        """
+        INSERT INTO products (sku, name, description, category_id)
+        VALUES (%s, %s, %s, %s)
+        """,
+        (payload["sku"], payload["name"], payload["description"], payload["category_id"]),
+    )
+    product = fetch_one(
+        """
+        SELECT product_id, sku, name, description, category_id, created_at
+        FROM products
+        WHERE product_id = %s
+        """,
+        (last_id,),
+    )
+    return jsonify({"message": "Product added", "product": product}), 201
+
+
+@app.route("/api/products/<int:product_id>", methods=["PUT"])
+def update_product(product_id):
+    payload = request.get_json(silent=True) or {}
+    missing = require_fields(payload, ["name"])
+    if missing:
+        return json_error("Missing field: name")
+
+    _, rowcount = execute_write(
+        "UPDATE products SET name = %s WHERE product_id = %s",
+        (payload["name"], product_id),
+    )
+    if rowcount == 0:
+        return json_error("Product not found", 404)
+
+    product = fetch_one(
+        """
+        SELECT product_id, sku, name, description, category_id, created_at
+        FROM products
+        WHERE product_id = %s
+        """,
+        (product_id,),
+    )
+    return jsonify({"message": "Product updated", "product": product})
+
+
+@app.route("/api/products/<int:product_id>", methods=["DELETE"])
+def delete_product(product_id):
+    _, rowcount = execute_write(
+        "DELETE FROM products WHERE product_id = %s",
+        (product_id,),
+    )
+    if rowcount == 0:
+        return json_error("Product not found", 404)
+    return jsonify({"message": "Product deleted"})
+
+
+@app.route("/api/insights/top-products", methods=["GET"])
+def top_products():
+    rows = fetch_all(
+        """
+        SELECT p.name, SUM(oi.quantity) AS sold
+        FROM order_items oi
+        JOIN seller_products sp ON oi.seller_product_id = sp.seller_product_id
+        JOIN products p ON sp.product_id = p.product_id
+        GROUP BY p.product_id
+        ORDER BY sold DESC
+        LIMIT 10
+        """
+    )
+    return jsonify(rows)
+
+
+@app.route("/api/insights/top-customers", methods=["GET"])
+def top_customers():
+    rows = fetch_all(
+        """
+        SELECT c.first_name AS name, COUNT(o.order_id) AS total_orders
+        FROM orders o
+        JOIN customers c ON o.customer_id = c.customer_id
+        GROUP BY c.customer_id
+        ORDER BY total_orders DESC
+        LIMIT 10
+        """
+    )
+    return jsonify(rows)
+
+
+@app.route("/api/inventory", methods=["GET"])
+def inventory():
+    rows = fetch_all(
+        """
+        SELECT s.name AS seller, p.name AS product, sp.stock
+        FROM seller_products sp
+        JOIN sellers s ON sp.seller_id = s.seller_id
+        JOIN products p ON sp.product_id = p.product_id
+        ORDER BY sp.stock ASC
+        """
+    )
+    return jsonify(rows)
+
+
+@app.route("/api/orders", methods=["GET"])
+def list_orders():
+    status_param = request.args.get("status", "")
+    statuses = [status.strip() for status in status_param.split(",") if status.strip()]
+    if statuses:
+        placeholders = ", ".join(["%s"] * len(statuses))
+        query = (
+            "SELECT order_id, status, total_amount, placed_at "
+            f"FROM orders WHERE status IN ({placeholders}) "
+            "ORDER BY placed_at DESC"
+        )
+        rows = fetch_all(query, tuple(statuses))
+    else:
+        rows = fetch_all(
+            """
+            SELECT order_id, status, total_amount, placed_at
+            FROM orders
+            ORDER BY placed_at DESC
+            """
+        )
+    return jsonify(rows)
+
+
+@app.route("/api/orders/<int:order_id>/status", methods=["POST"])
+def update_order_status(order_id):
+    payload = request.get_json(silent=True) or {}
+    status = payload.get("status")
+    if not status:
+        return json_error("Missing field: status")
+
+    allowed = {"pending", "processing", "shipped", "cancelled"}
+    if status not in allowed:
+        return json_error("Invalid status", 400)
+
+    _, rowcount = execute_write(
+        "UPDATE orders SET status = %s WHERE order_id = %s",
+        (status, order_id),
+    )
+    if rowcount == 0:
+        return json_error("Order not found", 404)
+
+    order = fetch_one(
+        "SELECT order_id, status, total_amount, placed_at FROM orders WHERE order_id = %s",
+        (order_id,),
+    )
+    return jsonify({"message": "Order updated", "order": order})
+
+
+@app.route("/api/payments", methods=["GET"])
+def list_payments():
+    rows = fetch_all(
+        """
+        SELECT p.payment_id, o.order_id, p.method, p.status, p.amount, p.created_at
+        FROM payments p
+        JOIN orders o ON p.order_id = o.order_id
+        ORDER BY p.created_at DESC
+        """
+    )
+    return jsonify(rows)
+
+
+@app.errorhandler(Error)
+def handle_db_error(error):
+    return json_error(f"Database error: {error}", 500)
+
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", "5000"))
+    app.run(host="0.0.0.0", port=port, debug=True)

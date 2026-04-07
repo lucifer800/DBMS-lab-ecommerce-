@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Ecommerce Control Room</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    >
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div class="bg-shapes" aria-hidden="true"></div>
+
+    <header class="hero">
+      <div class="hero__copy">
+        <p class="eyebrow">Ecommerce Management</p>
+        <h1>Control Room</h1>
+        <p class="lead">
+          A bold, user-friendly command center for products, orders, payments, and
+          inventory. Pick a command, fire it, and watch the console respond.
+        </p>
+        <div class="cta-row">
+          <button class="btn" id="demoToggle" type="button">Demo mode: On</button>
+          <button class="btn btn--ghost" id="connectToggle" type="button">Set API base</button>
+        </div>
+        <div class="api-panel" id="apiPanel" hidden>
+          <label for="apiBase">API base URL</label>
+          <div class="api-panel__row">
+            <input type="url" id="apiBase" placeholder="http://localhost:5000">
+            <button class="btn btn--dark" id="saveApi" type="button">Save</button>
+          </div>
+          <p class="hint">Turn demo mode off to send requests to your API.</p>
+        </div>
+      </div>
+      <div class="hero__art">
+        <div class="orb"></div>
+        <div class="orb orb--small"></div>
+        <div class="frame">
+          <div class="frame__title">System Pulse</div>
+          <div class="meter">
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <div class="stack">
+            <div class="stack__item">
+              <span>Orders in flight</span>
+              <span class="stat" id="statOrders">0</span>
+            </div>
+            <div class="stack__item">
+              <span>Active products</span>
+              <span class="stat" id="statProducts">0</span>
+            </div>
+            <div class="stack__item">
+              <span>Payments tracked</span>
+              <span class="stat" id="statPayments">0</span>
+            </div>
+          </div>
+          <p class="note">Demo data is preloaded to make the UI feel alive.</p>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="actions">
+        <div class="section-title">
+          <h2>Command Deck</h2>
+          <p>Every option from the CLI is mapped to a card here.</p>
+        </div>
+        <div class="grid">
+          <article class="card" style="--i: 1">
+            <div class="card__header">
+              <h3>Add Product</h3>
+              <p>Create a new catalog entry with SKU, category, and description.</p>
+            </div>
+            <form class="form" data-action="add-product">
+              <div class="field">
+                <label for="addSku">SKU</label>
+                <input id="addSku" name="sku" type="text" required>
+              </div>
+              <div class="field">
+                <label for="addName">Product name</label>
+                <input id="addName" name="name" type="text" required>
+              </div>
+              <div class="field">
+                <label for="addCategory">Category ID</label>
+                <input id="addCategory" name="category_id" type="number" min="1" required>
+              </div>
+              <div class="field">
+                <label for="addDesc">Description</label>
+                <textarea id="addDesc" name="description" rows="3" required></textarea>
+              </div>
+              <button class="btn btn--accent" type="submit">Add product</button>
+            </form>
+          </article>
+
+          <article class="card" style="--i: 2">
+            <div class="card__header">
+              <h3>View Products</h3>
+              <p>List all products with IDs, categories, and created dates.</p>
+            </div>
+            <button class="btn btn--accent" type="button" data-action="view-products">
+              View products
+            </button>
+          </article>
+
+          <article class="card" style="--i: 3">
+            <div class="card__header">
+              <h3>Update Product</h3>
+              <p>Change the name of a product using its product ID.</p>
+            </div>
+            <form class="form" data-action="update-product">
+              <div class="field">
+                <label for="updateId">Product ID</label>
+                <input id="updateId" name="product_id" type="number" min="1" required>
+              </div>
+              <div class="field">
+                <label for="updateName">New product name</label>
+                <input id="updateName" name="name" type="text" required>
+              </div>
+              <button class="btn btn--accent" type="submit">Update product</button>
+            </form>
+          </article>
+
+          <article class="card" style="--i: 4">
+            <div class="card__header">
+              <h3>Delete Product</h3>
+              <p>Remove a product by ID. This is irreversible.</p>
+            </div>
+            <form class="form" data-action="delete-product">
+              <div class="field">
+                <label for="deleteId">Product ID</label>
+                <input id="deleteId" name="product_id" type="number" min="1" required>
+              </div>
+              <button class="btn btn--accent" type="submit">Delete product</button>
+            </form>
+          </article>
+
+          <article class="card" style="--i: 5">
+            <div class="card__header">
+              <h3>Most Selling Products</h3>
+              <p>See the top 10 products by quantity sold.</p>
+            </div>
+            <button class="btn btn--accent" type="button" data-action="most-selling-products">
+              Show top sellers
+            </button>
+          </article>
+
+          <article class="card" style="--i: 6">
+            <div class="card__header">
+              <h3>Most Frequent Customers</h3>
+              <p>Rank customers by how many orders they place.</p>
+            </div>
+            <button class="btn btn--accent" type="button" data-action="most-frequent-customers">
+              Show top customers
+            </button>
+          </article>
+
+          <article class="card" style="--i: 7">
+            <div class="card__header">
+              <h3>Track Inventory</h3>
+              <p>Check inventory counts per seller and product.</p>
+            </div>
+            <button class="btn btn--accent" type="button" data-action="track-inventory">
+              View inventory
+            </button>
+          </article>
+
+          <article class="card" style="--i: 8">
+            <div class="card__header">
+              <h3>Process Orders</h3>
+              <p>Review pending orders and update status to shipped or cancelled.</p>
+            </div>
+            <div class="inline-actions">
+              <button class="btn btn--ghost" type="button" data-action="list-orders">
+                Load pending orders
+              </button>
+            </div>
+            <form class="form form--compact" data-action="update-order-status">
+              <div class="field">
+                <label for="orderId">Order ID</label>
+                <input id="orderId" name="order_id" type="number" min="1" required>
+              </div>
+              <div class="field">
+                <label for="orderStatus">New status</label>
+                <select id="orderStatus" name="status" required>
+                  <option value="shipped">Shipped</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              </div>
+              <button class="btn btn--accent" type="submit">Update order</button>
+            </form>
+          </article>
+
+          <article class="card" style="--i: 9">
+            <div class="card__header">
+              <h3>Payment Status</h3>
+              <p>Inspect recent payment records by method and status.</p>
+            </div>
+            <button class="btn btn--accent" type="button" data-action="payment-status">
+              View payments
+            </button>
+          </article>
+        </div>
+      </section>
+
+      <section class="console">
+        <div class="console__header">
+          <div>
+            <h2>Live Console</h2>
+            <p>Outputs and results appear here in real time.</p>
+          </div>
+          <div class="console__actions">
+            <span class="status" id="apiStatus">Demo</span>
+            <button class="btn btn--ghost" id="clearConsole" type="button">Clear</button>
+          </div>
+        </div>
+        <pre id="consoleOutput" aria-live="polite">Ready.</pre>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>Designed for clarity, speed, and dramatic focus.</p>
+    </footer>
+
+    <script src="app.js"></script>
+  </body>
+</html>
