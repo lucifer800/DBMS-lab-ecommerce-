@@ -1,6 +1,6 @@
 import os
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from flask import Flask, jsonify, request
 import mysql.connector
@@ -47,6 +47,15 @@ def serialize_row(row):
 
 def serialize_rows(rows):
     return [serialize_row(row) for row in rows]
+
+
+def parse_decimal(value, default=None):
+    if value is None or value == "":
+        return default
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return default
 
 
 def fetch_all(query, params=None):
@@ -126,6 +135,30 @@ def list_products():
     return jsonify(rows)
 
 
+@app.route("/api/catalog", methods=["GET"])
+def list_catalog():
+    rows = fetch_all(
+        """
+        SELECT
+            sp.seller_product_id,
+            p.product_id,
+            p.sku,
+            p.name,
+            p.description,
+            p.category_id,
+            p.created_at,
+            s.name AS seller,
+            sp.price,
+            sp.stock
+        FROM seller_products sp
+        JOIN products p ON sp.product_id = p.product_id
+        JOIN sellers s ON sp.seller_id = s.seller_id
+        ORDER BY p.created_at DESC, p.product_id DESC
+        """
+    )
+    return jsonify(rows)
+
+
 @app.route("/api/products", methods=["POST"])
 def create_product():
     payload = request.get_json(silent=True) or {}
@@ -140,6 +173,19 @@ def create_product():
         """,
         (payload["sku"], payload["name"], payload["description"], payload["category_id"]),
     )
+    seller_id = payload.get("seller_id")
+    price = payload.get("price")
+    stock = payload.get("stock")
+    if seller_id is not None and price is not None and price != "":
+        if stock is None or stock == "":
+            stock = 0
+        execute_write(
+            """
+            INSERT INTO seller_products (seller_id, product_id, price, stock)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (seller_id, last_id, price, stock),
+        )
     product = fetch_one(
         """
         SELECT product_id, sku, name, description, category_id, created_at
@@ -253,6 +299,121 @@ def list_orders():
             """
         )
     return jsonify(rows)
+
+
+@app.route("/api/orders", methods=["POST"])
+def create_order():
+    payload = request.get_json(silent=True) or {}
+    missing = require_fields(payload, ["customer_id", "seller_product_id", "quantity"])
+    if missing:
+        return json_error(f"Missing fields: {', '.join(missing)}")
+
+    try:
+        quantity = int(payload.get("quantity"))
+    except (TypeError, ValueError):
+        return json_error("Invalid quantity")
+
+    if quantity <= 0:
+        return json_error("Quantity must be greater than 0")
+
+    cgst_rate = parse_decimal(payload.get("cgst_rate"), Decimal("9"))
+    sgst_rate = parse_decimal(payload.get("sgst_rate"), Decimal("9"))
+    if cgst_rate is None or sgst_rate is None:
+        return json_error("Invalid GST rate")
+
+    shipping_address_id = payload.get("shipping_address_id")
+    if shipping_address_id in (None, ""):
+        shipping_address_id = None
+
+    conn = connect_db()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            """
+            SELECT
+                sp.seller_product_id,
+                sp.price,
+                sp.stock,
+                p.name AS product_name,
+                s.name AS seller
+            FROM seller_products sp
+            JOIN products p ON sp.product_id = p.product_id
+            JOIN sellers s ON sp.seller_id = s.seller_id
+            WHERE sp.seller_product_id = %s
+            """,
+            (payload["seller_product_id"],),
+        )
+        listing = cursor.fetchone()
+        if listing is None:
+            return json_error("Listing not found", 404)
+
+        if listing["stock"] is not None and quantity > listing["stock"]:
+            return json_error("Insufficient stock", 400)
+
+        unit_price = listing["price"]
+        subtotal = unit_price * quantity
+        cgst_amount = (subtotal * cgst_rate) / Decimal("100")
+        sgst_amount = (subtotal * sgst_rate) / Decimal("100")
+        total_amount = subtotal + cgst_amount + sgst_amount
+
+        cursor.execute(
+            """
+            INSERT INTO orders (customer_id, shipping_address_id, status, total_amount)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (payload["customer_id"], shipping_address_id, "pending", total_amount),
+        )
+        order_id = cursor.lastrowid
+
+        cursor.execute(
+            """
+            INSERT INTO order_items (order_id, seller_product_id, quantity, unit_price, line_total)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (order_id, payload["seller_product_id"], quantity, unit_price, subtotal),
+        )
+
+        if listing["stock"] is not None:
+            cursor.execute(
+                """
+                UPDATE seller_products
+                SET stock = stock - %s
+                WHERE seller_product_id = %s
+                """,
+                (quantity, payload["seller_product_id"]),
+            )
+
+        conn.commit()
+    finally:
+        cursor.close()
+        conn.close()
+
+    summary = {
+        "order_id": order_id,
+        "product": listing["product_name"],
+        "seller": listing["seller"],
+        "unit_price": unit_price,
+        "quantity": quantity,
+        "line_total": subtotal,
+        "cgst_rate": cgst_rate,
+        "cgst_amount": cgst_amount,
+        "sgst_rate": sgst_rate,
+        "sgst_amount": sgst_amount,
+        "total_payable": total_amount,
+    }
+    order = {
+        "order_id": order_id,
+        "customer_id": payload["customer_id"],
+        "status": "pending",
+        "total_amount": total_amount,
+    }
+    return jsonify(
+        {
+            "message": "Order created",
+            "order": serialize_row(order),
+            "summary": serialize_row(summary),
+        }
+    ), 201
 
 
 @app.route("/api/orders/<int:order_id>/status", methods=["POST"])

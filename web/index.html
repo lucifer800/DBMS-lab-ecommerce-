@@ -74,7 +74,85 @@
           <h2>Command Deck</h2>
           <p>Every option from the CLI is mapped to a card here.</p>
         </div>
-        <div class="grid">
+        <div class="grid grid--feature">
+          <article class="card card--compact" style="--i: 1">
+            <div class="card__header">
+              <h3>View Products</h3>
+              <p>List products with seller pricing, stock, and created dates.</p>
+            </div>
+            <button class="btn btn--accent" type="button" data-action="view-products">
+              View products
+            </button>
+          </article>
+
+          <article class="card card--order" style="--i: 2">
+            <div class="card__header">
+              <h3>Price + GST + Order</h3>
+              <p>Pick a listing, see CGST and SGST, then place the order.</p>
+            </div>
+            <form class="form" data-action="create-order" id="orderForm">
+              <div class="field">
+                <label for="orderProduct">Product listing</label>
+                <select id="orderProduct" name="seller_product_id" required></select>
+              </div>
+              <div class="field">
+                <label for="orderQty">Quantity</label>
+                <input id="orderQty" name="quantity" type="number" min="1" value="1" required>
+              </div>
+              <div class="field">
+                <label for="orderCustomer">Customer ID</label>
+                <input id="orderCustomer" name="customer_id" type="number" min="1" value="1" required>
+              </div>
+              <div class="field">
+                <label for="orderShip">Shipping Address ID (optional)</label>
+                <input id="orderShip" name="shipping_address_id" type="number" min="1">
+              </div>
+              <div class="form form--compact">
+                <div class="field">
+                  <label for="cgstRate">CGST %</label>
+                  <input id="cgstRate" name="cgst_rate" type="number" min="0" step="0.01" value="9">
+                </div>
+                <div class="field">
+                  <label for="sgstRate">SGST %</label>
+                  <input id="sgstRate" name="sgst_rate" type="number" min="0" step="0.01" value="9">
+                </div>
+              </div>
+              <div class="order-summary" id="orderSummary">
+                <div class="order-summary__item">
+                  <span>Unit price</span>
+                  <strong id="orderUnitPrice">INR 0.00</strong>
+                </div>
+                <div class="order-summary__item">
+                  <span>Subtotal</span>
+                  <strong id="orderSubtotal">INR 0.00</strong>
+                </div>
+                <div class="order-summary__item">
+                  <span>CGST</span>
+                  <strong id="orderCgst">INR 0.00</strong>
+                </div>
+                <div class="order-summary__item">
+                  <span>SGST</span>
+                  <strong id="orderSgst">INR 0.00</strong>
+                </div>
+                <div class="order-summary__item">
+                  <span>Stock left</span>
+                  <strong id="orderStock">N/A</strong>
+                </div>
+                <div class="order-summary__total">
+                  <span>Total payable</span>
+                  <strong id="orderTotal">INR 0.00</strong>
+                </div>
+              </div>
+              <div class="inline-actions">
+                <button class="btn btn--ghost" id="refreshCatalog" type="button">Refresh prices</button>
+                <button class="btn btn--accent" type="submit">Place order</button>
+              </div>
+            </form>
+            <p class="hint" id="orderHint">Prices update when the catalog loads.</p>
+          </article>
+        </div>
+
+        <div class="grid grid--main">
           <article class="card" style="--i: 1">
             <div class="card__header">
               <h3>Add Product</h3>
@@ -94,6 +172,18 @@
                 <input id="addCategory" name="category_id" type="number" min="1" required>
               </div>
               <div class="field">
+                <label for="addSeller">Seller ID (optional)</label>
+                <input id="addSeller" name="seller_id" type="number" min="1" placeholder="1">
+              </div>
+              <div class="field">
+                <label for="addPrice">Price (optional)</label>
+                <input id="addPrice" name="price" type="number" min="0" step="0.01" placeholder="499.00">
+              </div>
+              <div class="field">
+                <label for="addStock">Stock (optional)</label>
+                <input id="addStock" name="stock" type="number" min="0" step="1" placeholder="10">
+              </div>
+              <div class="field">
                 <label for="addDesc">Description</label>
                 <textarea id="addDesc" name="description" rows="3" required></textarea>
               </div>
@@ -102,16 +192,6 @@
           </article>
 
           <article class="card" style="--i: 2">
-            <div class="card__header">
-              <h3>View Products</h3>
-              <p>List all products with IDs, categories, and created dates.</p>
-            </div>
-            <button class="btn btn--accent" type="button" data-action="view-products">
-              View products
-            </button>
-          </article>
-
-          <article class="card" style="--i: 3">
             <div class="card__header">
               <h3>Update Product</h3>
               <p>Change the name of a product using its product ID.</p>
@@ -129,7 +209,7 @@
             </form>
           </article>
 
-          <article class="card" style="--i: 4">
+          <article class="card" style="--i: 3">
             <div class="card__header">
               <h3>Delete Product</h3>
               <p>Remove a product by ID. This is irreversible.</p>
@@ -143,7 +223,7 @@
             </form>
           </article>
 
-          <article class="card" style="--i: 5">
+          <article class="card" style="--i: 4">
             <div class="card__header">
               <h3>Most Selling Products</h3>
               <p>See the top 10 products by quantity sold.</p>
@@ -153,7 +233,7 @@
             </button>
           </article>
 
-          <article class="card" style="--i: 6">
+          <article class="card" style="--i: 5">
             <div class="card__header">
               <h3>Most Frequent Customers</h3>
               <p>Rank customers by how many orders they place.</p>
@@ -163,7 +243,7 @@
             </button>
           </article>
 
-          <article class="card" style="--i: 7">
+          <article class="card" style="--i: 6">
             <div class="card__header">
               <h3>Track Inventory</h3>
               <p>Check inventory counts per seller and product.</p>
@@ -173,7 +253,7 @@
             </button>
           </article>
 
-          <article class="card" style="--i: 8">
+          <article class="card" style="--i: 7">
             <div class="card__header">
               <h3>Process Orders</h3>
               <p>Review pending orders and update status to shipped or cancelled.</p>
@@ -199,7 +279,7 @@
             </form>
           </article>
 
-          <article class="card" style="--i: 9">
+          <article class="card" style="--i: 8">
             <div class="card__header">
               <h3>Payment Status</h3>
               <p>Inspect recent payment records by method and status.</p>
@@ -222,13 +302,62 @@
             <button class="btn btn--ghost" id="clearConsole" type="button">Clear</button>
           </div>
         </div>
-        <pre id="consoleOutput" aria-live="polite">Ready.</pre>
+        <div class="console__body">
+          <div class="data-panel" id="dataPanel" hidden>
+            <div class="data-panel__header">
+              <div>
+                <h3 id="dataTitle">Latest results</h3>
+                <p id="dataSubtitle">Tables appear for list commands.</p>
+              </div>
+              <button class="btn btn--ghost" id="clearTable" type="button">Clear table</button>
+            </div>
+            <div class="table-wrap">
+              <table class="table" id="dataTable">
+                <thead></thead>
+                <tbody></tbody>
+              </table>
+              <p class="table-empty" id="tableEmpty">No table data yet.</p>
+            </div>
+          </div>
+          <pre id="consoleOutput" aria-live="polite">Ready.</pre>
+        </div>
       </section>
     </main>
 
     <footer class="footer">
       <p>Designed for clarity, speed, and dramatic focus.</p>
     </footer>
+
+    <div
+      class="toast"
+      id="successToast"
+      role="alertdialog"
+      aria-live="assertive"
+      aria-modal="true"
+      hidden
+    >
+      <div class="toast__card">
+        <button class="toast__close" id="toastClose" type="button" aria-label="Close">
+          x
+        </button>
+        <div class="toast__icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              d="M20 6L9.5 16.5L4 11"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </div>
+        <h3 id="toastTitle">Payment successful</h3>
+        <p id="toastMessage">Your order has been placed.</p>
+        <div class="toast__actions">
+          <button class="btn btn--accent" id="toastOk" type="button">Okay</button>
+        </div>
+      </div>
+    </div>
 
     <script src="app.js"></script>
   </body>
