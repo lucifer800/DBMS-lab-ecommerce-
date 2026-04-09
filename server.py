@@ -24,7 +24,8 @@ SSL_VERIFY = os.getenv("ECOM_DB_SSL_VERIFY", "true").lower() == "true"
 def connect_db():
     config = dict(DB_CONFIG)
     if SSL_DISABLED:
-        config["ssl_disabled"] = True
+        config["ssl_verify_cert"] = False
+        config["ssl_verify_hostname"] = False
     elif SSL_CA:
         config["ssl_ca"] = SSL_CA
         config["ssl_verify_cert"] = SSL_VERIFY
