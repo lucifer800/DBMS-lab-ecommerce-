@@ -429,6 +429,10 @@ main {
   background: linear-gradient(140deg, var(--accent-2), var(--accent));
 }
 
+.toast--error .toast__icon {
+  background: linear-gradient(140deg, #f87171, #dc2626);
+}
+
 .toast__icon svg {
   width: 30px;
   height: 30px;

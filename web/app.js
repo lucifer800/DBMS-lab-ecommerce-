@@ -810,6 +810,33 @@ function hideSuccessToast() {
   document.body.classList.remove("toast-open");
 }
 
+function showErrorToast(message) {
+  const errorToast = document.getElementById("errorToast");
+  if (!errorToast) {
+    return;
+  }
+  const errorToastTitle = document.getElementById("errorToastTitle");
+  const errorToastMessage = document.getElementById("errorToastMessage");
+  if (errorToastTitle) {
+    errorToastTitle.textContent = "Order failed";
+  }
+  if (errorToastMessage) {
+    errorToastMessage.textContent = message || "Something went wrong. Please try again.";
+  }
+  errorToast.hidden = false;
+  document.body.classList.add("toast-open");
+  document.getElementById("errorToastOk")?.focus();
+}
+
+function hideErrorToast() {
+  const errorToast = document.getElementById("errorToast");
+  if (!errorToast) {
+    return;
+  }
+  errorToast.hidden = true;
+  document.body.classList.remove("toast-open");
+}
+
 function applyLocalStockDelta(sellerProductId, quantity) {
   if (!sellerProductId) {
     return;
@@ -898,6 +925,9 @@ async function dispatch(action, payload, sourceEl) {
     }
   } catch (error) {
     logLine(`Error: ${action}`, error?.message || error);
+    if (action === "create-order") {
+      showErrorToast(error?.message || "Order could not be placed. Please try again.");
+    }
   } finally {
     if (button) {
       button.disabled = false;
@@ -912,6 +942,10 @@ document.querySelectorAll("[data-action]").forEach((element) => {
       event.preventDefault();
       const formData = new FormData(element);
       const payload = normalizePayload(Object.fromEntries(formData.entries()));
+      // Remove shipping_address_id if empty to allow NULL in database
+      if (!payload.shipping_address_id || payload.shipping_address_id === 0 || payload.shipping_address_id === "") {
+        delete payload.shipping_address_id;
+      }
       await dispatch(action, payload, element);
       if (action !== "create-order") {
         element.reset();
@@ -994,6 +1028,30 @@ if (successToast) {
   successToast.addEventListener("click", (event) => {
     if (event.target === successToast) {
       hideSuccessToast();
+    }
+  });
+}
+
+const errorToastEl = document.getElementById("errorToast");
+const errorToastOkEl = document.getElementById("errorToastOk");
+const errorToastCloseEl = document.getElementById("errorToastClose");
+
+if (errorToastOkEl) {
+  errorToastOkEl.addEventListener("click", () => {
+    hideErrorToast();
+  });
+}
+
+if (errorToastCloseEl) {
+  errorToastCloseEl.addEventListener("click", () => {
+    hideErrorToast();
+  });
+}
+
+if (errorToastEl) {
+  errorToastEl.addEventListener("click", (event) => {
+    if (event.target === errorToastEl) {
+      hideErrorToast();
     }
   });
 }
