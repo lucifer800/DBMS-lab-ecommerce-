@@ -148,6 +148,9 @@ function logLine(title, data) {
 }
 
 function parseNumber(value) {
+  if (value === "" || value === null || value === undefined) {
+    return value;
+  }
   const parsed = Number(value);
   return Number.isNaN(parsed) ? value : parsed;
 }
@@ -810,6 +813,30 @@ function hideSuccessToast() {
   document.body.classList.remove("toast-open");
 }
 
+function showErrorToast(message) {
+  if (!errorToast) {
+    return;
+  }
+  hideSuccessToast();
+  if (errorToastTitle) {
+    errorToastTitle.textContent = "Order failed";
+  }
+  if (errorToastMessage) {
+    errorToastMessage.textContent = message || "Unable to place order right now.";
+  }
+  errorToast.hidden = false;
+  document.body.classList.add("toast-open");
+  errorToastOk?.focus();
+}
+
+function hideErrorToast() {
+  if (!errorToast) {
+    return;
+  }
+  errorToast.hidden = true;
+  document.body.classList.remove("toast-open");
+}
+
 function applyLocalStockDelta(sellerProductId, quantity) {
   if (!sellerProductId) {
     return;
@@ -889,6 +916,7 @@ async function dispatch(action, payload, sourceEl) {
       renderTable(action, tableData);
     }
     if (action === "create-order") {
+      hideErrorToast();
       showSuccessToast(data?.summary || data?.order || data);
       applyLocalStockDelta(payload?.seller_product_id, data?.summary?.quantity || payload?.quantity);
       await refreshInventoryTable();
@@ -898,6 +926,9 @@ async function dispatch(action, payload, sourceEl) {
     }
   } catch (error) {
     logLine(`Error: ${action}`, error?.message || error);
+    if (action === "create-order") {
+      showErrorToast(error?.message || "Unable to place order right now.");
+    }
   } finally {
     if (button) {
       button.disabled = false;
@@ -912,6 +943,12 @@ document.querySelectorAll("[data-action]").forEach((element) => {
       event.preventDefault();
       const formData = new FormData(element);
       const payload = normalizePayload(Object.fromEntries(formData.entries()));
+      if (action === "create-order") {
+        const shippingAddressId = payload.shipping_address_id;
+        if (!shippingAddressId || Number(shippingAddressId) === 0 || Number.isNaN(Number(shippingAddressId))) {
+          delete payload.shipping_address_id;
+        }
+      }
       await dispatch(action, payload, element);
       if (action !== "create-order") {
         element.reset();
@@ -955,6 +992,11 @@ const toastTitle = document.getElementById("toastTitle");
 const toastMessage = document.getElementById("toastMessage");
 const toastOk = document.getElementById("toastOk");
 const toastClose = document.getElementById("toastClose");
+const errorToast = document.getElementById("errorToast");
+const errorToastTitle = document.getElementById("errorToastTitle");
+const errorToastMessage = document.getElementById("errorToastMessage");
+const errorToastOk = document.getElementById("errorToastOk");
+const errorToastClose = document.getElementById("errorToastClose");
 
 refreshStats();
 updateStatusLabel();
@@ -994,6 +1036,26 @@ if (successToast) {
   successToast.addEventListener("click", (event) => {
     if (event.target === successToast) {
       hideSuccessToast();
+    }
+  });
+}
+
+if (errorToastOk) {
+  errorToastOk.addEventListener("click", () => {
+    hideErrorToast();
+  });
+}
+
+if (errorToastClose) {
+  errorToastClose.addEventListener("click", () => {
+    hideErrorToast();
+  });
+}
+
+if (errorToast) {
+  errorToast.addEventListener("click", (event) => {
+    if (event.target === errorToast) {
+      hideErrorToast();
     }
   });
 }

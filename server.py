@@ -324,10 +324,23 @@ def create_order():
     shipping_address_id = payload.get("shipping_address_id")
     if shipping_address_id in (None, ""):
         shipping_address_id = None
+    else:
+        try:
+            shipping_address_id = int(shipping_address_id)
+        except (TypeError, ValueError):
+            return json_error("Invalid shipping address ID")
 
     conn = connect_db()
     cursor = conn.cursor(dictionary=True)
     try:
+        if shipping_address_id is not None:
+            cursor.execute(
+                "SELECT address_id FROM addresses WHERE address_id = %s AND customer_id = %s",
+                (shipping_address_id, payload["customer_id"]),
+            )
+            if cursor.fetchone() is None:
+                return json_error("Shipping address not found for customer", 400)
+
         cursor.execute(
             """
             SELECT
