@@ -95,6 +95,7 @@ const statPayments = document.getElementById("statPayments");
 const logs = [];
 let catalogItems = [];
 let catalogById = new Map();
+let customerItems = [];
 let lastTableAction = null;
 
 function updateStatusLabel() {
@@ -153,6 +154,10 @@ function parseNumber(value) {
   }
   const parsed = Number(value);
   return Number.isNaN(parsed) ? value : parsed;
+}
+
+function isListingActive(listing) {
+  return listing?.is_active === undefined || Number(listing.is_active) === 1;
 }
 
 function normalizePayload(payload) {
@@ -221,7 +226,8 @@ function getTopProducts() {
 
 function getListingById(sellerProductId) {
   return mock.sellerProducts.find(
-    (entry) => entry.seller_product_id === Number(sellerProductId)
+    (entry) =>
+      entry.seller_product_id === Number(sellerProductId) && isListingActive(entry)
   );
 }
 
@@ -255,22 +261,57 @@ function getTopCustomers() {
 }
 
 function buildCatalogRows() {
-  return mock.sellerProducts.map((listing) => {
-    const product = mock.products.find(
-      (entry) => entry.product_id === listing.product_id
-    );
-    return {
-      seller_product_id: listing.seller_product_id,
-      product_id: listing.product_id,
-      sku: product?.sku,
-      name: product?.name,
-      description: product?.description,
-      category_id: product?.category_id,
-      created_at: product?.created_at,
-      seller: listing.seller,
-      price: listing.price,
-      stock: listing.stock,
-    };
+  const rows = [];
+  const listedProductIds = new Set();
+
+  mock.sellerProducts
+    .filter((listing) => isListingActive(listing))
+    .forEach((listing) => {
+      const product = mock.products.find(
+        (entry) => entry.product_id === listing.product_id
+      );
+      if (!product) {
+        return;
+      }
+      listedProductIds.add(product.product_id);
+      rows.push({
+        seller_product_id: listing.seller_product_id,
+        product_id: listing.product_id,
+        sku: product.sku,
+        name: product.name,
+        description: product.description,
+        category_id: product.category_id,
+        created_at: product.created_at,
+        seller: listing.seller,
+        price: listing.price,
+        stock: listing.stock,
+      });
+    });
+
+  mock.products
+    .filter((product) => !listedProductIds.has(product.product_id))
+    .forEach((product) => {
+      rows.push({
+        seller_product_id: null,
+        product_id: product.product_id,
+        sku: product.sku,
+        name: product.name,
+        description: product.description,
+        category_id: product.category_id,
+        created_at: product.created_at,
+        seller: null,
+        price: null,
+        stock: null,
+      });
+    });
+
+  return rows.sort((a, b) => {
+    const aTime = Date.parse(a.created_at || "");
+    const bTime = Date.parse(b.created_at || "");
+    if (Number.isFinite(aTime) && Number.isFinite(bTime) && aTime !== bTime) {
+      return bTime - aTime;
+    }
+    return Number(b.product_id || 0) - Number(a.product_id || 0);
   });
 }
 
@@ -296,10 +337,13 @@ function updateCatalogSelect(items) {
   if (!orderProduct) {
     return;
   }
+  const orderableItems = Array.isArray(items)
+    ? items.filter((item) => Number.isFinite(Number(item?.seller_product_id)))
+    : [];
   const previous = orderProduct.value;
   orderProduct.innerHTML = "";
 
-  if (!items || items.length === 0) {
+  if (orderableItems.length === 0) {
     const option = document.createElement("option");
     option.value = "";
     option.textContent = "No products available";
@@ -316,7 +360,7 @@ function updateCatalogSelect(items) {
   placeholder.selected = true;
   orderProduct.appendChild(placeholder);
 
-  items.forEach((item) => {
+  orderableItems.forEach((item) => {
     const option = document.createElement("option");
     option.value = String(item.seller_product_id);
     const priceLabel = formatCurrency(item.price);
@@ -328,8 +372,74 @@ function updateCatalogSelect(items) {
 
   if (previous && catalogById.has(previous)) {
     orderProduct.value = previous;
-  } else if (items[0]) {
-    orderProduct.value = String(items[0].seller_product_id);
+  } else if (orderableItems[0]) {
+    orderProduct.value = String(orderableItems[0].seller_product_id);
+  }
+}
+
+function formatCustomerLabel(customer) {
+  const first = customer?.first_name || "";
+  const last = customer?.last_name || "";
+  const fullName = `${first} ${last}`.trim();
+  const primary = fullName || customer?.email || "Customer";
+  return `${customer.customer_id} | ${primary}`;
+}
+
+function updateCustomerSelect(items) {
+  if (!orderCustomer) {
+    return;
+  }
+  const previous = orderCustomer.value;
+  orderCustomer.innerHTML = "";
+
+  const validCustomers = Array.isArray(items)
+    ? items.filter((item) => Number.isFinite(Number(item?.customer_id)))
+    : [];
+
+  if (validCustomers.length === 0) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No customers available";
+    orderCustomer.appendChild(option);
+    orderCustomer.disabled = true;
+    if (orderHint) {
+      orderHint.textContent = "No customers found. Add customers before placing an order.";
+    }
+    if (orderSubmit) {
+      orderSubmit.disabled = true;
+    }
+    return;
+  }
+
+  orderCustomer.disabled = false;
+  validCustomers.forEach((customer) => {
+    const option = document.createElement("option");
+    option.value = String(customer.customer_id);
+    option.textContent = formatCustomerLabel(customer);
+    orderCustomer.appendChild(option);
+  });
+
+  const hasPrevious = validCustomers.some(
+    (customer) => String(customer.customer_id) === previous
+  );
+  orderCustomer.value = hasPrevious
+    ? previous
+    : String(validCustomers[0].customer_id);
+}
+
+async function loadCustomers() {
+  if (!orderCustomer) {
+    return;
+  }
+  try {
+    const rows = state.demo ? mock.customers : await apiRequest("/api/customers", "GET");
+    customerItems = Array.isArray(rows) ? rows : [];
+    updateCustomerSelect(customerItems);
+    updateOrderSummary();
+  } catch (error) {
+    customerItems = [];
+    updateCustomerSelect([]);
+    logLine("Error: customers", error?.message || error);
   }
 }
 
@@ -339,6 +449,7 @@ function updateOrderSummary() {
   }
 
   const listing = orderProduct ? catalogById.get(orderProduct.value) : null;
+  const hasCustomer = Boolean(orderCustomer && !orderCustomer.disabled && orderCustomer.value);
   const quantity = Math.max(1, toNumber(orderQty?.value, 1));
   const cgstRate = Math.max(0, toNumber(cgstRateInput?.value, DEFAULT_GST_RATE));
   const sgstRate = Math.max(0, toNumber(sgstRateInput?.value, DEFAULT_GST_RATE));
@@ -387,9 +498,11 @@ function updateOrderSummary() {
   if (orderSubmit) {
     const hasStock = listing.stock !== undefined && listing.stock !== null;
     const exceedsStock = hasStock ? quantity > Number(listing.stock) : false;
-    orderSubmit.disabled = exceedsStock;
+    orderSubmit.disabled = exceedsStock || !hasCustomer;
     if (exceedsStock && orderHint) {
       orderHint.textContent = `Requested quantity exceeds stock. Available: ${listing.stock}.`;
+    } else if (!hasCustomer && orderHint) {
+      orderHint.textContent = "Select a valid customer before placing the order.";
     }
   }
 }
@@ -401,8 +514,11 @@ async function loadCatalog() {
   try {
     const items = state.demo ? buildCatalogRows() : await apiRequest("/api/catalog", "GET");
     catalogItems = Array.isArray(items) ? items : [];
+    const orderableItems = catalogItems.filter((item) =>
+      Number.isFinite(Number(item?.seller_product_id))
+    );
     catalogById = new Map(
-      catalogItems.map((item) => [String(item.seller_product_id), item])
+      orderableItems.map((item) => [String(item.seller_product_id), item])
     );
     updateCatalogSelect(catalogItems);
     updateOrderSummary();
@@ -410,7 +526,7 @@ async function loadCatalog() {
       renderTable("view-products", catalogItems);
     }
     if (orderHint) {
-      if (catalogItems.length) {
+      if (orderableItems.length) {
         orderHint.textContent = `Prices refreshed at ${formatTime(new Date())}.`;
       } else {
         orderHint.textContent = "No listings available for pricing.";
@@ -462,6 +578,7 @@ const demoHandlers = {
         seller: `Seller ${payload.seller_id}`,
         price: payload.price,
         stock: payload.stock || 0,
+        is_active: 1,
       });
     }
     return { message: "Product added", product };
@@ -478,14 +595,41 @@ const demoHandlers = {
     return { message: "Product updated", product };
   },
   "delete-product": async (payload) => {
-    const index = mock.products.findIndex(
+    const product = mock.products.find(
       (item) => item.product_id === payload.product_id
     );
-    if (index === -1) {
+    if (!product) {
       throw new Error("Product not found");
     }
-    const [removed] = mock.products.splice(index, 1);
-    return { message: "Product deleted", product: removed };
+
+    let hiddenListings = 0;
+    const inventoryKeysToRemove = new Set();
+    mock.sellerProducts.forEach((listing) => {
+      if (listing.product_id === payload.product_id && isListingActive(listing)) {
+        listing.is_active = 0;
+        hiddenListings += 1;
+        inventoryKeysToRemove.add(`${listing.seller}::${product.name}`);
+      }
+    });
+
+    if (hiddenListings > 0) {
+      mock.inventory = mock.inventory.filter(
+        (row) => !inventoryKeysToRemove.has(`${row.seller}::${row.product}`)
+      );
+      return {
+        message: "Product has been deleted successfully",
+        mode: "soft-delete",
+        hidden_listings: hiddenListings,
+      };
+    }
+
+    const productIndex = mock.products.findIndex(
+      (item) => item.product_id === payload.product_id
+    );
+    if (productIndex >= 0) {
+      mock.products.splice(productIndex, 1);
+    }
+    return { message: "Product has been deleted successfully", mode: "hard-delete" };
   },
   "most-selling-products": async () => getTopProducts(),
   "most-frequent-customers": async () => getTopCustomers(),
@@ -511,6 +655,12 @@ const demoHandlers = {
     const listing = getListingById(payload.seller_product_id);
     if (!listing) {
       throw new Error("Listing not found");
+    }
+    const customer = mock.customers.find(
+      (entry) => entry.customer_id === Number(payload.customer_id)
+    );
+    if (!customer) {
+      throw new Error("Customer not found");
     }
     const quantity = Math.max(1, toNumber(payload.quantity, 1));
     const cgstRate = Math.max(0, toNumber(payload.cgst_rate, DEFAULT_GST_RATE));
@@ -790,15 +940,26 @@ function buildSuccessMessage(summary) {
   return `${orderId}${productLabel}${sellerLabel} confirmed.${totalLabel}`;
 }
 
-function showSuccessToast(summary) {
+function buildDeleteSuccessMessage(data, payload) {
+  const productId = payload?.product_id;
+  const idText = productId ? `Product #${productId}` : "Product";
+  if (data?.mode === "soft-delete") {
+    return `${idText} has been deleted successfully and removed from active catalog/inventory.`;
+  }
+  return `${idText} has been deleted successfully.`;
+}
+
+function showSuccessToast(summary, options = {}) {
   if (!successToast) {
     return;
   }
+  const title = options.title || "Payment successful";
+  const message = options.message || buildSuccessMessage(summary);
   if (toastTitle) {
-    toastTitle.textContent = "Payment successful";
+    toastTitle.textContent = title;
   }
   if (toastMessage) {
-    toastMessage.textContent = buildSuccessMessage(summary);
+    toastMessage.textContent = message;
   }
   successToast.hidden = false;
   document.body.classList.add("toast-open");
@@ -813,13 +974,14 @@ function hideSuccessToast() {
   document.body.classList.remove("toast-open");
 }
 
-function showErrorToast(message) {
+function showErrorToast(message, options = {}) {
   if (!errorToast) {
     return;
   }
+  const title = options.title || "Order failed";
   hideSuccessToast();
   if (errorToastTitle) {
-    errorToastTitle.textContent = "Order failed";
+    errorToastTitle.textContent = title;
   }
   if (errorToastMessage) {
     errorToastMessage.textContent = message || "Unable to place order right now.";
@@ -921,6 +1083,24 @@ async function dispatch(action, payload, sourceEl) {
       applyLocalStockDelta(payload?.seller_product_id, data?.summary?.quantity || payload?.quantity);
       await refreshInventoryTable();
     }
+
+    if (action === "add-product") {
+      hideErrorToast();
+      showSuccessToast(null, {
+        title: "Product added",
+        message: "New product added congrats!!",
+      });
+    }
+
+    if (action === "delete-product") {
+      hideErrorToast();
+      showSuccessToast(null, {
+        title: "Product deleted",
+        message: buildDeleteSuccessMessage(data, payload),
+      });
+      await refreshInventoryTable();
+    }
+
     if (["add-product", "delete-product", "update-product", "create-order"].includes(action)) {
       await loadCatalog();
     }
@@ -928,6 +1108,16 @@ async function dispatch(action, payload, sourceEl) {
     logLine(`Error: ${action}`, error?.message || error);
     if (action === "create-order") {
       showErrorToast(error?.message || "Unable to place order right now.");
+    } else if (action === "add-product") {
+      showErrorToast(
+        error?.message || "Unable to add product right now.",
+        { title: "Add product failed" }
+      );
+    } else if (action === "delete-product") {
+      showErrorToast(
+        error?.message || "Unable to delete product right now.",
+        { title: "Delete failed" }
+      );
     }
   } finally {
     if (button) {
@@ -944,6 +1134,13 @@ document.querySelectorAll("[data-action]").forEach((element) => {
       const formData = new FormData(element);
       const payload = normalizePayload(Object.fromEntries(formData.entries()));
       if (action === "create-order") {
+        const customerId = Number(payload.customer_id);
+        if (!Number.isInteger(customerId) || customerId <= 0) {
+          showErrorToast("Please select a valid customer.");
+          return;
+        }
+        payload.customer_id = customerId;
+
         const shippingAddressId = payload.shipping_address_id;
         if (!shippingAddressId || Number(shippingAddressId) === 0 || Number.isNaN(Number(shippingAddressId))) {
           delete payload.shipping_address_id;
@@ -976,6 +1173,7 @@ const clearTable = document.getElementById("clearTable");
 const orderForm = document.getElementById("orderForm");
 const orderProduct = document.getElementById("orderProduct");
 const orderQty = document.getElementById("orderQty");
+const orderCustomer = document.getElementById("orderCustomer");
 const orderUnitPrice = document.getElementById("orderUnitPrice");
 const orderSubtotal = document.getElementById("orderSubtotal");
 const orderCgst = document.getElementById("orderCgst");
@@ -1007,6 +1205,7 @@ if (apiBaseInput) {
 
 logLine("Boot", "Console online. Demo data loaded.");
 loadCatalog();
+loadCustomers();
 
 if (clearTable) {
   clearTable.addEventListener("click", () => {
@@ -1079,6 +1278,7 @@ if (demoToggle) {
     updateStatusLabel();
     logLine("Mode", state.demo ? "Demo mode enabled" : "API mode enabled");
     loadCatalog();
+    loadCustomers();
   });
 }
 
@@ -1099,6 +1299,7 @@ if (saveApi) {
       logLine("API base", "Cleared");
     }
     loadCatalog();
+    loadCustomers();
   });
 }
 

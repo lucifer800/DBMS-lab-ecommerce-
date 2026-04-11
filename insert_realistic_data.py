@@ -8,7 +8,7 @@ def connect_db():
     return mysql.connector.connect(
         host="localhost",
         user="root",               
-        password="Janvistar800",  
+        password="12345678",  
         database="ecommerce_db"
     )
 
@@ -142,8 +142,8 @@ print("👤 Inserting 1500 customers...")
 customer_ids = []
 for i in range(1500):
     cursor.execute(
-        "INSERT INTO customers (email, first_name, last_name, phone) VALUES (%s, %s, %s, %s)",
-        (fake.unique.email(), fake.first_name(), 
+        "INSERT INTO customers (email, password, first_name, last_name, phone) VALUES (%s, %s, %s, %s, %s)",
+        (fake.unique.email(), fake.password(), fake.first_name(), 
          fake.last_name(), fake.phone_number())
     )
     customer_ids.append(cursor.lastrowid)
@@ -203,10 +203,12 @@ for order_id in order_ids:
     for _ in range(num_items):
         sp = random.choice(seller_product_ids)
         qty = random.randint(1, 3)
-        price = round(random.uniform(10, 500), 2)
+        cursor.execute("SELECT price FROM seller_products WHERE seller_product_id = %s", (sp,))
+        price = cursor.fetchone()[0]
+        line_total = round(price * qty, 2)
         cursor.execute(
-            "INSERT INTO order_items (order_id, seller_product_id, quantity, price) VALUES (%s, %s, %s, %s)",
-            (order_id, sp, qty, price)
+            "INSERT INTO order_items (order_id, seller_product_id, quantity, unit_price, line_total) VALUES (%s, %s, %s, %s, %s)",
+            (order_id, sp, qty, price, line_total)
         )
         order_items_count += 1
 print(f"   ✓ {order_items_count} order items inserted")

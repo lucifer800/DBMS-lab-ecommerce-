@@ -8,7 +8,7 @@ def connect_db():
     return mysql.connector.connect(
         host="localhost",
         user="root",               
-        password="Janvistar800",  
+        password="12345678",  
         database="ecommerce_db"
     )
 
@@ -192,13 +192,20 @@ def insert_all_data():
         for i in range(2000):
             try:
                 qty = random.randint(1, 5)
-                price = round(random.uniform(5.0, 500.0), 2)
+                sp_id = random.choice(seller_product_ids)
                 cursor.execute(
-                    "INSERT INTO order_items (order_id, seller_product_id, quantity, price) VALUES (%s, %s, %s, %s)",
+                    "SELECT price FROM seller_products WHERE seller_product_id = %s",
+                    (sp_id,),
+                )
+                price = cursor.fetchone()[0]
+                line_total = round(price * qty, 2)
+                cursor.execute(
+                    "INSERT INTO order_items (order_id, seller_product_id, quantity, unit_price, line_total) VALUES (%s, %s, %s, %s, %s)",
                     (random.choice(order_ids),
-                     random.choice(seller_product_ids),
+                     sp_id,
                      qty,
-                     price)
+                     price,
+                     line_total)
                 )
                 order_items_count += 1
                 if (i + 1) % 200 == 0:

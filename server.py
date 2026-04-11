@@ -150,10 +150,12 @@ def list_catalog():
             s.name AS seller,
             sp.price,
             sp.stock
-        FROM seller_products sp
-        JOIN products p ON sp.product_id = p.product_id
-        JOIN sellers s ON sp.seller_id = s.seller_id
-        ORDER BY p.created_at DESC, p.product_id DESC
+        FROM products p
+        LEFT JOIN seller_products sp
+            ON sp.product_id = p.product_id
+           AND sp.is_active = 1
+        LEFT JOIN sellers s ON sp.seller_id = s.seller_id
+        ORDER BY p.created_at DESC, p.product_id DESC, sp.seller_product_id DESC
         """
     )
     return jsonify(rows)
@@ -224,13 +226,70 @@ def update_product(product_id):
 
 @app.route("/api/products/<int:product_id>", methods=["DELETE"])
 def delete_product(product_id):
-    _, rowcount = execute_write(
-        "DELETE FROM products WHERE product_id = %s",
-        (product_id,),
+    conn = connect_db()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        cursor.execute(
+            "SELECT product_id FROM products WHERE product_id = %s",
+            (product_id,),
+        )
+        product = cursor.fetchone()
+        if product is None:
+            return json_error("Product not found", 404)
+
+        try:
+            cursor.execute(
+                "DELETE FROM products WHERE product_id = %s",
+                (product_id,),
+            )
+            conn.commit()
+            return jsonify({"message": "Product has been deleted successfully"})
+        except Error as error:
+            # FK-referenced products are soft-deleted from active catalog/inventory.
+            if getattr(error, "errno", None) != 1451:
+                conn.rollback()
+                raise
+            conn.rollback()
+
+        cursor.execute(
+            """
+            UPDATE seller_products
+            SET is_active = 0
+            WHERE product_id = %s AND is_active = 1
+            """,
+            (product_id,),
+        )
+        hidden_listings = cursor.rowcount
+        conn.commit()
+
+        if hidden_listings == 0:
+            return json_error(
+                "Product cannot be deleted because it is linked to previous orders",
+                400,
+            )
+
+        return jsonify(
+            {
+                "message": "Product has been deleted successfully",
+                "mode": "soft-delete",
+                "hidden_listings": hidden_listings,
+            }
+        )
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.route("/api/customers", methods=["GET"])
+def list_customers():
+    rows = fetch_all(
+        """
+        SELECT customer_id, first_name, last_name, email
+        FROM customers
+        ORDER BY customer_id ASC
+        """
     )
-    if rowcount == 0:
-        return json_error("Product not found", 404)
-    return jsonify({"message": "Product deleted"})
+    return jsonify(rows)
 
 
 @app.route("/api/insights/top-products", methods=["GET"])
@@ -272,6 +331,7 @@ def inventory():
         FROM seller_products sp
         JOIN sellers s ON sp.seller_id = s.seller_id
         JOIN products p ON sp.product_id = p.product_id
+        WHERE sp.is_active = 1
         ORDER BY sp.stock ASC
         """
     )
@@ -309,6 +369,22 @@ def create_order():
         return json_error(f"Missing fields: {', '.join(missing)}")
 
     try:
+        customer_id = int(payload.get("customer_id"))
+    except (TypeError, ValueError):
+        return json_error("Invalid customer ID")
+
+    if customer_id <= 0:
+        return json_error("Customer ID must be greater than 0")
+
+    try:
+        seller_product_id = int(payload.get("seller_product_id"))
+    except (TypeError, ValueError):
+        return json_error("Invalid seller product ID")
+
+    if seller_product_id <= 0:
+        return json_error("Seller product ID must be greater than 0")
+
+    try:
         quantity = int(payload.get("quantity"))
     except (TypeError, ValueError):
         return json_error("Invalid quantity")
@@ -329,14 +405,23 @@ def create_order():
             shipping_address_id = int(shipping_address_id)
         except (TypeError, ValueError):
             return json_error("Invalid shipping address ID")
+        if shipping_address_id <= 0:
+            return json_error("Shipping address ID must be greater than 0")
 
     conn = connect_db()
     cursor = conn.cursor(dictionary=True)
     try:
+        cursor.execute(
+            "SELECT customer_id FROM customers WHERE customer_id = %s",
+            (customer_id,),
+        )
+        if cursor.fetchone() is None:
+            return json_error("Customer not found", 400)
+
         if shipping_address_id is not None:
             cursor.execute(
                 "SELECT address_id FROM addresses WHERE address_id = %s AND customer_id = %s",
-                (shipping_address_id, payload["customer_id"]),
+                (shipping_address_id, customer_id),
             )
             if cursor.fetchone() is None:
                 return json_error("Shipping address not found for customer", 400)
@@ -352,9 +437,9 @@ def create_order():
             FROM seller_products sp
             JOIN products p ON sp.product_id = p.product_id
             JOIN sellers s ON sp.seller_id = s.seller_id
-            WHERE sp.seller_product_id = %s
+            WHERE sp.seller_product_id = %s AND sp.is_active = 1
             """,
-            (payload["seller_product_id"],),
+            (seller_product_id,),
         )
         listing = cursor.fetchone()
         if listing is None:
@@ -374,7 +459,7 @@ def create_order():
             INSERT INTO orders (customer_id, shipping_address_id, status, total_amount)
             VALUES (%s, %s, %s, %s)
             """,
-            (payload["customer_id"], shipping_address_id, "pending", total_amount),
+            (customer_id, shipping_address_id, "pending", total_amount),
         )
         order_id = cursor.lastrowid
 
@@ -383,7 +468,7 @@ def create_order():
             INSERT INTO order_items (order_id, seller_product_id, quantity, unit_price, line_total)
             VALUES (%s, %s, %s, %s, %s)
             """,
-            (order_id, payload["seller_product_id"], quantity, unit_price, subtotal),
+            (order_id, seller_product_id, quantity, unit_price, subtotal),
         )
 
         if listing["stock"] is not None:
@@ -393,7 +478,7 @@ def create_order():
                 SET stock = stock - %s
                 WHERE seller_product_id = %s
                 """,
-                (quantity, payload["seller_product_id"]),
+                (quantity, seller_product_id),
             )
 
         conn.commit()
@@ -416,7 +501,7 @@ def create_order():
     }
     order = {
         "order_id": order_id,
-        "customer_id": payload["customer_id"],
+        "customer_id": customer_id,
         "status": "pending",
         "total_amount": total_amount,
     }
