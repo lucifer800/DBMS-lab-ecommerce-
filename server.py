@@ -168,26 +168,95 @@ def create_product():
     if missing:
         return json_error(f"Missing fields: {', '.join(missing)}")
 
-    last_id, _ = execute_write(
-        """
-        INSERT INTO products (sku, name, description, category_id)
-        VALUES (%s, %s, %s, %s)
-        """,
-        (payload["sku"], payload["name"], payload["description"], payload["category_id"]),
-    )
-    seller_id = payload.get("seller_id")
-    price = payload.get("price")
+    try:
+        category_id = int(payload.get("category_id"))
+    except (TypeError, ValueError):
+        return json_error("Invalid category ID")
+
+    if category_id <= 0:
+        return json_error("Category ID must be greater than 0")
+
+    raw_seller_id = payload.get("seller_id")
+    has_seller = raw_seller_id not in (None, "")
+    if has_seller:
+        try:
+            seller_id = int(raw_seller_id)
+        except (TypeError, ValueError):
+            return json_error("Invalid seller ID")
+        if seller_id <= 0:
+            return json_error("Seller ID must be greater than 0")
+    else:
+        seller_id = None
+
+    raw_price = payload.get("price")
+    has_price = raw_price not in (None, "")
+
+    if has_seller != has_price:
+        return json_error("Provide both seller_id and price together")
+
     stock = payload.get("stock")
-    if seller_id is not None and price is not None and price != "":
-        if stock is None or stock == "":
-            stock = 0
-        execute_write(
+    if stock in (None, ""):
+        stock = 0
+    else:
+        try:
+            stock = int(stock)
+        except (TypeError, ValueError):
+            return json_error("Invalid stock")
+        if stock < 0:
+            return json_error("Stock cannot be negative")
+
+    conn = connect_db()
+    cursor = conn.cursor()
+    try:
+        conn.start_transaction()
+
+        cursor.execute(
+            "SELECT category_id FROM categories WHERE category_id = %s",
+            (category_id,),
+        )
+        if cursor.fetchone() is None:
+            conn.rollback()
+            return json_error("Category not found. Use an existing category_id.", 400)
+
+        if has_seller:
+            cursor.execute(
+                "SELECT seller_id FROM sellers WHERE seller_id = %s",
+                (seller_id,),
+            )
+            if cursor.fetchone() is None:
+                conn.rollback()
+                return json_error("Seller not found. Use an existing seller_id.", 400)
+
+        cursor.execute(
             """
-            INSERT INTO seller_products (seller_id, product_id, price, stock)
+            INSERT INTO products (sku, name, description, category_id)
             VALUES (%s, %s, %s, %s)
             """,
-            (seller_id, last_id, price, stock),
+            (payload["sku"], payload["name"], payload["description"], category_id),
         )
+        last_id = cursor.lastrowid
+
+        if has_seller:
+            cursor.execute(
+                """
+                INSERT INTO seller_products (seller_id, product_id, price, stock)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (seller_id, last_id, raw_price, stock),
+            )
+
+        conn.commit()
+    except Error as error:
+        conn.rollback()
+        if getattr(error, "errno", None) == 1062:
+            return json_error("Duplicate SKU or duplicate seller-product mapping", 409)
+        if getattr(error, "errno", None) == 1452:
+            return json_error("Invalid foreign key reference in request", 400)
+        return json_error(f"Database error: {error}", 500)
+    finally:
+        cursor.close()
+        conn.close()
+
     product = fetch_one(
         """
         SELECT product_id, sku, name, description, category_id, created_at
@@ -227,54 +296,76 @@ def update_product(product_id):
 @app.route("/api/products/<int:product_id>", methods=["DELETE"])
 def delete_product(product_id):
     conn = connect_db()
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor()
     try:
-        cursor.execute(
-            "SELECT product_id FROM products WHERE product_id = %s",
-            (product_id,),
-        )
-        product = cursor.fetchone()
-        if product is None:
-            return json_error("Product not found", 404)
-
         try:
+            conn.start_transaction()
+
+            cursor.execute(
+                "SELECT product_id FROM products WHERE product_id = %s",
+                (product_id,),
+            )
+            if cursor.fetchone() is None:
+                conn.rollback()
+                return json_error("Product not found", 404)
+
+            cursor.execute(
+                "SELECT seller_product_id FROM seller_products WHERE product_id = %s",
+                (product_id,),
+            )
+            seller_product_ids = [row[0] for row in cursor.fetchall()]
+
+            order_items_deleted = 0
+            inventory_logs_deleted = 0
+            if seller_product_ids:
+                placeholders = ", ".join(["%s"] * len(seller_product_ids))
+                cursor.execute(
+                    f"DELETE FROM order_items WHERE seller_product_id IN ({placeholders})",
+                    tuple(seller_product_ids),
+                )
+                order_items_deleted = cursor.rowcount
+
+                cursor.execute(
+                    f"DELETE FROM inventory_logs WHERE seller_product_id IN ({placeholders})",
+                    tuple(seller_product_ids),
+                )
+                inventory_logs_deleted = cursor.rowcount
+
+            cursor.execute(
+                "DELETE FROM seller_products WHERE product_id = %s",
+                (product_id,),
+            )
+            seller_products_deleted = cursor.rowcount
+
             cursor.execute(
                 "DELETE FROM products WHERE product_id = %s",
                 (product_id,),
             )
-            conn.commit()
-            return jsonify({"message": "Product has been deleted successfully"})
-        except Error as error:
-            # FK-referenced products are soft-deleted from active catalog/inventory.
-            if getattr(error, "errno", None) != 1451:
+            products_deleted = cursor.rowcount
+
+            if products_deleted == 0:
                 conn.rollback()
-                raise
-            conn.rollback()
+                return json_error("Product not found", 404)
 
-        cursor.execute(
-            """
-            UPDATE seller_products
-            SET is_active = 0
-            WHERE product_id = %s AND is_active = 1
-            """,
-            (product_id,),
-        )
-        hidden_listings = cursor.rowcount
-        conn.commit()
-
-        if hidden_listings == 0:
-            return json_error(
-                "Product cannot be deleted because it is linked to previous orders",
-                400,
+            conn.commit()
+            return jsonify(
+                {
+                    "message": "Product and related seller listings deleted successfully",
+                    "product_id": product_id,
+                    "products_deleted": products_deleted,
+                    "seller_products_deleted": seller_products_deleted,
+                    "order_items_deleted": order_items_deleted,
+                    "inventory_logs_deleted": inventory_logs_deleted,
+                }
             )
-
-        return jsonify(
-            {
-                "message": "Product has been deleted successfully",
-                "mode": "soft-delete",
-                "hidden_listings": hidden_listings,
-            }
-        )
+        except Error as error:
+            conn.rollback()
+            if getattr(error, "errno", None) == 1451:
+                return json_error(
+                    "Delete failed due to remaining dependent records.",
+                    409,
+                )
+            return json_error(f"Database error: {error}", 500)
     finally:
         cursor.close()
         conn.close()
